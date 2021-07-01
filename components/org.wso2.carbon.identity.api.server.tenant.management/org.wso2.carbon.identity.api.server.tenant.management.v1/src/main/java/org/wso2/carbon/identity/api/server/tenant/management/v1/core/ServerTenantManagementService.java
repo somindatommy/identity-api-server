@@ -60,7 +60,9 @@ import java.util.Map;
 
 import javax.ws.rs.core.Response;
 
+import static org.wso2.carbon.identity.api.server.common.Constants.ERROR_CODE_RESOURCE_LIMIT_REACHED;
 import static org.wso2.carbon.identity.api.server.common.Constants.V1_API_PATH_COMPONENT;
+import static org.wso2.carbon.identity.api.server.tenant.management.common.TenantManagementConstants.ErrorMessage.ERROR_CODE_TENANT_LIMIT_REACHED;
 import static org.wso2.carbon.identity.api.server.tenant.management.common.TenantManagementConstants.TENANT_MANAGEMENT_PATH_COMPONENT;
 import static org.wso2.carbon.stratos.common.constants.TenantConstants.ErrorMessage.ERROR_CODE_INVALID_EMAIL;
 import static org.wso2.carbon.stratos.common.constants.TenantConstants.ErrorMessage.ERROR_CODE_MISSING_REQUIRED_PARAMETER;
@@ -142,6 +144,39 @@ public class ServerTenantManagementService {
     }
 
     /**
+     * Get a tenant identified by tenant unique id.
+     *
+     * @param domain tenant domain.
+     * @return TenantResponseModel.
+     */
+    public TenantResponseModel getTenantByDomain(String domain) {
+
+        try {
+            Tenant tenant = TenantManagementServiceHolder.getTenantMgtService().getTenantByDomain(domain);
+            return createTenantResponse(tenant);
+        } catch (TenantMgtException e) {
+            throw handleTenantManagementException(e, TenantManagementConstants.ErrorMessage.
+                    ERROR_CODE_ERROR_RETRIEVING_TENANT, domain);
+        }
+    }
+
+    /**
+     * Get a tenant identified by tenant domain.
+     *
+     * @param tenantDomain tenant unique identifier.
+     * @return taken or not.
+     */
+    public boolean isDomainAvailable(String tenantDomain) {
+
+        try {
+            return TenantManagementServiceHolder.getTenantMgtService().isDomainAvailable(tenantDomain);
+        } catch (TenantMgtException e) {
+            throw handleTenantManagementException(e, TenantManagementConstants.ErrorMessage.
+                    ERROR_CODE_ERROR_RETRIEVING_TENANT, tenantDomain);
+        }
+    }
+
+    /**
      * Get owners of a tenant which is identified by tenant unique id.
      *
      * @param tenantUniqueID tenant unique identifier.
@@ -155,6 +190,21 @@ public class ServerTenantManagementService {
         } catch (TenantMgtException e) {
             throw handleTenantManagementException(e, TenantManagementConstants.ErrorMessage.
                     ERROR_CODE_ERROR_RETRIEVING_TENANT, tenantUniqueID);
+        }
+    }
+
+    /**
+     * Delete the metadata of the tenant which is identified by tenant unique id.
+     *
+     * @param tenantUniqueID tenant unique identifier.
+     */
+    public void deleteTenantMetadata(String tenantUniqueID) {
+
+        try {
+            TenantManagementServiceHolder.getTenantMgtService().deleteTenantMetaData(tenantUniqueID);
+        } catch (TenantMgtException e) {
+            throw handleTenantManagementException(e, TenantManagementConstants.ErrorMessage.
+                    ERROR_CODE_DELETE_TENANT_METADATA, tenantUniqueID);
         }
     }
 
@@ -377,6 +427,9 @@ public class ServerTenantManagementService {
         Response.Status status;
 
         if (e instanceof TenantManagementClientException) {
+            if (ERROR_CODE_RESOURCE_LIMIT_REACHED.equals(e.getErrorCode())) {
+                return handleResourceLimitReached();
+            }
             errorResponse = getErrorBuilder(errorEnum, data).build(log, errorEnum.getDescription());
             if (e.getErrorCode() != null) {
                 String errorCode = e.getErrorCode();
@@ -396,6 +449,15 @@ public class ServerTenantManagementService {
             errorResponse = getErrorBuilder(errorEnum, data).build(log, e, errorEnum.getDescription());
             status = Response.Status.INTERNAL_SERVER_ERROR;
         }
+        return new APIError(status, errorResponse);
+    }
+
+    private APIError handleResourceLimitReached() {
+
+        ErrorResponse errorResponse = getErrorBuilder(ERROR_CODE_TENANT_LIMIT_REACHED, null)
+                .build(log, ERROR_CODE_TENANT_LIMIT_REACHED.getDescription());
+
+        Response.Status status = Response.Status.FORBIDDEN;
         return new APIError(status, errorResponse);
     }
 
@@ -482,9 +544,10 @@ public class ServerTenantManagementService {
         try {
             UserRecoveryData recoveryData = userRecoveryDataStore.load(code);
             if (recoveryData != null && recoveryData.getUser() != null && tenant.getOwners() != null &&
-                    tenant.getOwners().get(0) != null && tenant.getOwners().get(0).getUsername() != null &&
-                    tenant.getOwners().get(0).getUsername().equalsIgnoreCase(recoveryData.getUser().getUserName())) {
+                    tenant.getOwners().get(0) != null && tenant.getOwners().get(0).getEmail() != null &&
+                    tenant.getOwners().get(0).getEmail().equalsIgnoreCase(recoveryData.getUser().getUserName())) {
                 userRecoveryDataStore.invalidate(code);
+                return;
             } else { // the confirmed email using the code and submitted emails are different.
                 userRecoveryDataStore.invalidate(code);
                 log.warn("The confirmed email using the code and submitted emails are different.");
@@ -505,13 +568,12 @@ public class ServerTenantManagementService {
         Map<String, String> claimsMap = new HashMap<>();
 
         tenant.setActive(true);
-        tenant.setDomain(channelVerifiedTenantModel.getDomain());
+        tenant.setDomain(StringUtils.lowerCase(channelVerifiedTenantModel.getDomain()));
         if (channelVerifiedTenantModel.getOwners() != null && channelVerifiedTenantModel.getOwners().size() > 0
                 && channelVerifiedTenantModel.getOwners().get(0) != null) {
             tenant.setAdminName(channelVerifiedTenantModel.getOwners().get(0).getEmail());
             tenant.setAdminFirstName(channelVerifiedTenantModel.getOwners().get(0).getFirstname());
             tenant.setAdminLastName(channelVerifiedTenantModel.getOwners().get(0).getLastname());
-            tenant.setDomain(channelVerifiedTenantModel.getDomain());
             tenant.setEmail(channelVerifiedTenantModel.getOwners().get(0).getEmail());
 
             tenant.setProvisioningMethod(VERIFIED_LITE_USER);

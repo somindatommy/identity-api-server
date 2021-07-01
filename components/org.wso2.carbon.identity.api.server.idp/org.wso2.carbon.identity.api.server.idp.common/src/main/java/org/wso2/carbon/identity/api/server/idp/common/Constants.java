@@ -30,6 +30,7 @@ public class Constants {
     public static final String IDP_TEMPLATE_PATH_COMPONENT = "/templates";
     public static final String PATH_SEPERATOR = "/";
     public static final String JWKS_URI = "jwksUri";
+    public static final String TEMPLATE_ID = "templateId";
     public static final String META_DATA_SAML = "meta_data_saml";
     public static final String SELECT_MODE = "SelectMode";
     public static final String SELECT_MODE_METADATA = "Metadata File Configuration";
@@ -107,15 +108,28 @@ public class Constants {
         ERROR_CODE_INVALID_LOCAL_CLAIM_ID("60024",
                 "Invalid claim uri.",
                 "Invalid claim uri %s provided in claim config."),
-        ERROR_CODE_INVALID_INPUT("60025", "Invalid input.", "One of the given inputs is invalid."),
+        ERROR_CODE_INVALID_INPUT("60025", "Invalid input.", "One of the given inputs is invalid.%s"),
         ERROR_CODE_INVALID_SAML_METADATA("60026", "Invalid SAML metadata.", "SAML metadata is invalid/empty."),
         ERROR_CODE_INVALID_DEFAULT_AUTHENTICATOR("60027", "Invalid default authenticator ID",
                 "Provided value for the default authenticator ID is invalid."),
-        ERROR_CODE_INVALID_DEFAULT_OUTBOUND_CONNECTOR("60027", "Invalid default outbound connector ID",
+        ERROR_CODE_INVALID_DEFAULT_OUTBOUND_CONNECTOR("60028", "Invalid default outbound connector ID",
                 "Provided value for the default outbound connector ID is invalid."),
-        ERROR_CODE_OUTBOUND_PROVISIONING_CONFIG_NOT_FOUND("60028", "Unable to update Outbound " +
+        ERROR_CODE_OUTBOUND_PROVISIONING_CONFIG_NOT_FOUND("60029", "Unable to update Outbound " +
                 "Provisioning Connector", "Outbound Provisioning Connector properties have not specified " +
                 "for connector : %s"),
+        ERROR_CODE_INVALID_USER_CLAIM_URI("IDP-60030", "Invalid user ID claim URI",
+                "User ID claim URI: %s does not match with the claim mappings"),
+        ERROR_CODE_INVALID_ROLE_CLAIM_URI("IDP-60031", "Invalid role claim URI",
+                "Role claim URI: %s does not match with the claim mappings"),
+        ERROR_CODE_NOT_EXISTING_CLAIM_URI("IDP-60032", "Invalid claim URI",
+                "One or more local claim URIs do not exist"),
+        ERROR_CODE_NOT_EXISTING_USER_CLAIM_URI("IDP-60033", "Invlaid user ID claim URI",
+                "User ID claim URI is not a local claim for tenant: %s"),
+        ERROR_CODE_NOT_EXISTING_ROLE_CLAIM_URI("IDP-60034", "Invalid role claim URI",
+                "Role claim URI is not a local claim for tenant: %s"),
+        ERROR_CODE_IDP_LIMIT_REACHED("60035",
+                "Unable to create an identity provider.",
+                "Maximum number of allowed identity providers have been reached."),
 
         // Server Error starting from 650xx.
         ERROR_CODE_ERROR_ADDING_IDP("65002",
@@ -213,7 +227,10 @@ public class Constants {
                 "Error occurred while updating the IDP template with identifier %s."),
         ERROR_CODE_ERROR_RETRIEVING_IDP_TEMPLATE("65054", "Unable to retrieve IDP template.",
                 "Error occurred while retrieving the IDP template with identifier %s"),
-        ERROR_CODE_ERROR_INVALID_SEARCH_FILTER("65055", "Search request validation failed.", "Invalid search filter.");
+        ERROR_CODE_ERROR_INVALID_SEARCH_FILTER("65055", "Search request validation failed.",
+                "Invalid search filter."),
+        ERROR_CODE_VALIDATING_LOCAL_CLAIM_URIS("IDP-65056", "Error while validation local claim URIs",
+                "Error while validating claim URIs against local claims");
 
         private final String code;
         private final String message;

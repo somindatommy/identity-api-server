@@ -15,6 +15,7 @@
  */
 package org.wso2.carbon.identity.api.server.application.management.v1.core.functions.application.inbound.oauth2;
 
+import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -106,7 +107,7 @@ public class OAuthInboundFunctions {
              */
             try {
                 ApplicationManagementServiceHolder.getCorsManagementService().setCORSOrigins
-                        (String.valueOf(application.getApplicationID()), existingCORSOrigins, tenantDomain);
+                        (application.getApplicationResourceId(), existingCORSOrigins, tenantDomain);
             } catch (CORSManagementServiceException corsManagementServiceException) {
                 throw handleException(e);
             }
@@ -119,8 +120,11 @@ public class OAuthInboundFunctions {
 
     private static APIError handleException(Exception e) {
 
-        String message = "Error while Creating/Updating OAuth2/OpenIDConnect configuration. " + e.getMessage();
-        if (e instanceof IdentityOAuthClientException || e instanceof CORSManagementServiceClientException) {
+        String message = "Error while updating OpenIDConnect configuration. " + e.getMessage();
+        if (e instanceof IdentityOAuthClientException) {
+            String errorCode = ((IdentityOAuthClientException) e).getErrorCode();
+            return buildBadRequestError(errorCode, message);
+        } else if (e instanceof CORSManagementServiceClientException) {
             return buildBadRequestError(message);
         }
         return buildServerError(message, e);
@@ -223,20 +227,17 @@ public class OAuthInboundFunctions {
      *
      * @param applicationId   application id
      * @param oidcConfigModel oidc configurations of the application.
+     * @throws CORSManagementServiceException if CORS origin update fails.
      */
-    public static void updateCorsOrigins(String applicationId, OpenIDConnectConfiguration oidcConfigModel) {
+    public static void updateCorsOrigins(String applicationId, OpenIDConnectConfiguration oidcConfigModel)
+            throws CORSManagementServiceException {
 
         String tenantDomain = ContextLoader.getTenantDomainFromContext();
-
         // Update the CORS origins.
         List<String> corsOrigins = oidcConfigModel.getAllowedOrigins();
-        try {
-            if (corsOrigins != null) {
-                ApplicationManagementServiceHolder.getCorsManagementService()
-                        .setCORSOrigins(applicationId, corsOrigins, tenantDomain);
-            }
-        } catch (CORSManagementServiceException e) {
-            throw handleException(e);
+        if (!CollectionUtils.isEmpty(corsOrigins)) {
+            ApplicationManagementServiceHolder.getCorsManagementService()
+                    .setCORSOrigins(applicationId, corsOrigins, tenantDomain);
         }
     }
 }

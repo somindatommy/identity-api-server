@@ -37,6 +37,12 @@ public class TenantManagementConstants {
      */
     public enum ErrorMessage {
 
+        /* Adding the client error TM-60019 to align with
+         the same client error defined in
+         org.wso2.carbon.stratos.common.constants.TenantConstants */
+        ERROR_CODE_TENANT_LIMIT_REACHED("TM-60019",
+                "Unable to create a tenant.",
+                "Maximum number of allowed tenants have been reached."),
         ERROR_CODE_ERROR_LISTING_TENANTS("TM-65001",
                 "Unable to list existing tenants.",
                 "Server encountered an error while listing the tenants."),
@@ -53,7 +59,12 @@ public class TenantManagementConstants {
         ERROR_CODE_FILTER_NOT_IMPLEMENTED("TM-65006", "Filtering not supported.", "Filtering capability is not " +
                 "supported in this version of the API."),
         ERROR_CODE_ERROR_VALIDATING_TENANT_CODE("TM-65007",
-                                               "Unable to add tenant.", "Error occurred in validating the code.");
+                                               "Unable to add tenant.", "Error occurred in validating the code."),
+        ERROR_CODE_ERROR_CHECKING_TENANT_AVAILABILITY("TM-65008",
+                                                        "Unable to check availability of domain.",
+                "Server encountered an error while checking for tenant domain"),
+        ERROR_CODE_DELETE_TENANT_METADATA("TM-65008", "Error while deleting the tenant metadata.",
+                "Server encountered an error while deleting the tenant metadata identified by %s .");
 
         private final String code;
         private final String message;

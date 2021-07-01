@@ -15,6 +15,7 @@
  */
 package org.wso2.carbon.identity.api.server.application.management.v1.core;
 
+import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang.ArrayUtils;
 import org.apache.commons.lang.StringUtils;
@@ -87,11 +88,11 @@ import org.wso2.carbon.identity.configuration.mgt.core.search.PrimitiveCondition
 import org.wso2.carbon.identity.core.model.ExpressionNode;
 import org.wso2.carbon.identity.core.model.FilterTreeBuilder;
 import org.wso2.carbon.identity.core.model.Node;
-import org.wso2.carbon.identity.core.util.IdentityTenantUtil;
 import org.wso2.carbon.identity.core.util.IdentityUtil;
-import org.wso2.carbon.identity.cors.mgt.core.dao.CORSOriginDAO;
-import org.wso2.carbon.identity.cors.mgt.core.dao.impl.CORSOriginDAOImpl;
-import org.wso2.carbon.identity.cors.mgt.core.exception.CORSManagementServiceServerException;
+import org.wso2.carbon.identity.cors.mgt.core.CORSManagementService;
+import org.wso2.carbon.identity.cors.mgt.core.constant.ErrorMessages;
+import org.wso2.carbon.identity.cors.mgt.core.exception.CORSManagementServiceClientException;
+import org.wso2.carbon.identity.cors.mgt.core.exception.CORSManagementServiceException;
 import org.wso2.carbon.identity.cors.mgt.core.model.CORSOrigin;
 import org.wso2.carbon.identity.template.mgt.TemplateManager;
 import org.wso2.carbon.identity.template.mgt.TemplateMgtConstants;
@@ -101,6 +102,9 @@ import org.wso2.carbon.identity.template.mgt.model.Template;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.MalformedURLException;
+import java.net.URISyntaxException;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -112,6 +116,7 @@ import java.util.stream.Collectors;
 
 import static org.wso2.carbon.identity.api.server.application.management.common.ApplicationManagementConstants.APPLICATION_MANAGEMENT_PATH_COMPONENT;
 import static org.wso2.carbon.identity.api.server.application.management.common.ApplicationManagementConstants.ErrorMessage.APPLICATION_CREATION_WITH_TEMPLATES_NOT_IMPLEMENTED;
+import static org.wso2.carbon.identity.api.server.application.management.common.ApplicationManagementConstants.ErrorMessage.ERROR_APPLICATION_LIMIT_REACHED;
 import static org.wso2.carbon.identity.api.server.application.management.common.ApplicationManagementConstants.ErrorMessage.INBOUND_NOT_CONFIGURED;
 import static org.wso2.carbon.identity.api.server.application.management.v1.core.functions.Utils.buildBadRequestError;
 import static org.wso2.carbon.identity.api.server.application.management.v1.core.functions.Utils.buildNotImplementedError;
@@ -120,6 +125,7 @@ import static org.wso2.carbon.identity.api.server.application.management.v1.core
 import static org.wso2.carbon.identity.api.server.application.management.v1.core.functions.application.inbound.InboundFunctions.rollbackInbound;
 import static org.wso2.carbon.identity.api.server.application.management.v1.core.functions.application.inbound.InboundFunctions.rollbackInbounds;
 import static org.wso2.carbon.identity.api.server.application.management.v1.core.functions.application.inbound.InboundFunctions.updateOrInsertInbound;
+import static org.wso2.carbon.identity.api.server.common.Constants.ERROR_CODE_RESOURCE_LIMIT_REACHED;
 import static org.wso2.carbon.identity.application.authentication.framework.util.FrameworkConstants.StandardInboundProtocols.OAUTH2;
 import static org.wso2.carbon.identity.application.authentication.framework.util.FrameworkConstants.StandardInboundProtocols.PASSIVE_STS;
 import static org.wso2.carbon.identity.application.authentication.framework.util.FrameworkConstants.StandardInboundProtocols.SAML2;
@@ -127,6 +133,7 @@ import static org.wso2.carbon.identity.application.authentication.framework.util
 import static org.wso2.carbon.identity.application.common.util.IdentityApplicationConstants.Error.INVALID_REQUEST;
 import static org.wso2.carbon.identity.application.common.util.IdentityApplicationConstants.Error.UNEXPECTED_SERVER_ERROR;
 import static org.wso2.carbon.identity.configuration.mgt.core.search.constant.ConditionType.PrimitiveOperator.EQUALS;
+import static org.wso2.carbon.identity.cors.mgt.core.constant.ErrorMessages.ERROR_CODE_INVALID_APP_ID;
 
 /**
  * Calls internal osgi services to perform server application management related operations.
@@ -315,13 +322,22 @@ public class ServerApplicationManagementService {
             throw buildNotImplementedError(errorCode, "Application creation with templates not supported.");
         }
 
+        /*
+         * CORS adding step should be moved to the service layer and the validation also should happen there.
+         * But for now we are handling the validation here.
+         */
+        if (applicationModel.getInboundProtocolConfiguration() != null &&
+                applicationModel.getInboundProtocolConfiguration().getOidc() != null) {
+            validateCORSOrigins(applicationModel.getInboundProtocolConfiguration().getOidc().getAllowedOrigins());
+        }
+
         String username = ContextLoader.getUsernameFromContext();
         String tenantDomain = ContextLoader.getTenantDomainFromContext();
 
+        String applicationId = null;
         ServiceProvider application = new ApiModelToServiceProvider().apply(applicationModel);
         try {
-            String applicationId = getApplicationManagementService().createApplication(application, tenantDomain,
-                    username);
+            applicationId = getApplicationManagementService().createApplication(application, tenantDomain, username);
             if (applicationModel.getInboundProtocolConfiguration() != null &&
                     applicationModel.getInboundProtocolConfiguration().getOidc() != null) {
                 OAuthInboundFunctions.updateCorsOrigins(applicationId, applicationModel
@@ -330,12 +346,22 @@ public class ServerApplicationManagementService {
             return applicationId;
         } catch (IdentityApplicationManagementException e) {
             if (log.isDebugEnabled()) {
-                log.debug("Error while creating application. Rolling back possibly created inbound config data.");
+                log.debug("Error while creating application. Rolling back possibly created inbound config data.", e);
             }
             rollbackInbounds(getConfiguredInbounds(application));
-
-            String msg = "Error creating application.";
-            throw handleIdentityApplicationManagementException(e, msg);
+            throw handleIdentityApplicationManagementException(e, "Error creating application.");
+        } catch (CORSManagementServiceException e) {
+            if (log.isDebugEnabled()) {
+                log.debug("Error while updating CORS origins. Rolling back created application data.", e);
+            }
+            if (applicationId != null) {
+                deleteApplication(applicationId);
+            }
+            if (ErrorMessages.ERROR_CODE_DUPLICATE_ORIGINS.getCode().equals(e.getErrorCode())) {
+                throw buildClientError(e,
+                        "Error creating application. Found duplicate allowed origin entries.");
+            }
+            throw buildClientError(e, "Error creating application. Allow CORS origins update failed.");
         }
     }
 
@@ -361,11 +387,37 @@ public class ServerApplicationManagementService {
 
         String username = ContextLoader.getUsernameFromContext();
         String tenantDomain = ContextLoader.getTenantDomainFromContext();
+        CORSManagementService corsManagementService = ApplicationManagementServiceHolder.getCorsManagementService();
         try {
+            // Delete CORS origins for OIDC Apps.
+            List<CORSOrigin> existingCORSOrigins =
+                    corsManagementService.getApplicationCORSOrigins(applicationId, tenantDomain);
+            if (!CollectionUtils.isEmpty(existingCORSOrigins)) {
+                ApplicationManagementServiceHolder.getCorsManagementService()
+                        .deleteCORSOrigins(applicationId,
+                                existingCORSOrigins.stream().map(CORSOrigin::getId).collect(Collectors.toList()),
+                                tenantDomain);
+            }
+
+            // Delete Application.
             getApplicationManagementService().deleteApplicationByResourceId(applicationId, tenantDomain, username);
         } catch (IdentityApplicationManagementException e) {
             String msg = "Error deleting application with id: " + applicationId;
             throw handleIdentityApplicationManagementException(e, msg);
+        } catch (CORSManagementServiceClientException e) {
+            /*
+             For not existing application scenarios the following error code will be returned. To preserve the behaviour
+             we need to return 204.
+             */
+            if (ERROR_CODE_INVALID_APP_ID.getCode().equals(e.getErrorCode())) {
+                log.error("Invalid application id: " + applicationId, e);
+                return;
+            }
+            String msg = "Error while trying to remove CORS origins associated with the application: " + applicationId;
+            throw Utils.buildClientError(e.getErrorCode(), msg, e.getMessage());
+        } catch (CORSManagementServiceException e) {
+            String msg = "Error while trying to remove CORS origins associated with the application: " + applicationId;
+            throw Utils.buildServerError(msg, e);
         }
     }
 
@@ -488,6 +540,11 @@ public class ServerApplicationManagementService {
 
     public void putInboundOAuthConfiguration(String applicationId, OpenIDConnectConfiguration oidcConfigModel) {
 
+        /*
+         * CORS updating step should be moved to the service layer and the validation also should happen there.
+         * But for now we are handling the validation here.
+         */
+        validateCORSOrigins(oidcConfigModel.getAllowedOrigins());
         putInbound(applicationId, oidcConfigModel, OAuthInboundFunctions::putOAuthInbound);
     }
 
@@ -819,26 +876,13 @@ public class ServerApplicationManagementService {
         // Delete the associated CORS origins if the inboundType is oauth2.
         if (inboundType.equals(OAUTH2)) {
             String tenantDomain = PrivilegedCarbonContext.getThreadLocalCarbonContext().getTenantDomain();
-            int tenantId = IdentityTenantUtil.getTenantId(tenantDomain);
-            CORSOriginDAO corsOriginDAO = new CORSOriginDAOImpl();
-            List<CORSOrigin> existingCORSOrigins = null;
-            ApplicationBasicInfo applicationBasicInfo = null;
+            CORSManagementService corsManagementService = ApplicationManagementServiceHolder.getCorsManagementService();
             try {
-                applicationBasicInfo = ApplicationManagementService.getInstance()
-                        .getApplicationBasicInfoByResourceId(applicationId, tenantDomain);
-                existingCORSOrigins = corsOriginDAO.getCORSOriginsByApplicationId(
-                        applicationBasicInfo.getApplicationId(), tenantId);
-                corsOriginDAO.deleteCORSOrigins(applicationBasicInfo.getApplicationId(), existingCORSOrigins.stream()
-                        .map(CORSOrigin::getId).collect(Collectors.toList()), tenantId);
-            } catch (CORSManagementServiceServerException | IdentityApplicationManagementException e) {
-                if (applicationBasicInfo != null && existingCORSOrigins != null) {
-                    try {
-                        corsOriginDAO.addCORSOrigins(applicationBasicInfo.getApplicationId(), existingCORSOrigins,
-                                tenantId);
-                    } catch (CORSManagementServiceServerException corsManagementServiceServerException) {
-                        log.error("Error while trying to remove CORS origins associated with the application.", e);
-                    }
-                }
+                List<CORSOrigin> existingCORSOrigins = corsManagementService
+                        .getApplicationCORSOrigins(applicationId, tenantDomain);
+                corsManagementService.deleteCORSOrigins(applicationId, existingCORSOrigins.stream()
+                        .map(CORSOrigin::getId).collect(Collectors.toList()), tenantDomain);
+            } catch (CORSManagementServiceException e) {
                 log.error("Error while trying to remove CORS origins associated with the application.", e);
             }
         }
@@ -1049,7 +1093,18 @@ public class ServerApplicationManagementService {
     private APIError buildClientError(IdentityApplicationManagementException e, String message) {
 
         String errorCode = getErrorCode(e, INVALID_REQUEST.getCode());
+        if (ERROR_CODE_RESOURCE_LIMIT_REACHED.equals(errorCode)) {
+            return handleResourceLimitReached();
+        }
         return Utils.buildClientError(errorCode, message, e.getMessage());
+    }
+
+    private APIError handleResourceLimitReached() {
+
+        String code = ERROR_APPLICATION_LIMIT_REACHED.getCode();
+        String message = ERROR_APPLICATION_LIMIT_REACHED.getMessage();
+        String description = ERROR_APPLICATION_LIMIT_REACHED.getDescription();
+        return Utils.buildForbiddenError(code, message, description);
     }
 
     private String getErrorCode(IdentityApplicationManagementException e, String defaultErrorCode) {
@@ -1083,7 +1138,18 @@ public class ServerApplicationManagementService {
         return Utils.buildClientError(errorCode, message, e.getMessage());
     }
 
+    private APIError buildClientError(CORSManagementServiceException e, String message) {
+
+        String errorCode = getErrorCode(e, INVALID_REQUEST.getCode());
+        return Utils.buildClientError(errorCode, message, e.getMessage());
+    }
+
     private String getErrorCode(TemplateManagementException e, String defaultErrorCode) {
+
+        return e.getErrorCode() != null ? e.getErrorCode() : defaultErrorCode;
+    }
+
+    private String getErrorCode(CORSManagementServiceException e, String defaultErrorCode) {
 
         return e.getErrorCode() != null ? e.getErrorCode() : defaultErrorCode;
     }
@@ -1100,6 +1166,34 @@ public class ServerApplicationManagementService {
             return String.format(description, formatData);
         } else {
             return description;
+        }
+    }
+
+    /**
+     * Validate the CORS Origins. This should be moved to the service layer with the CORS adding step on creating
+     * OIDC applications.
+     *
+     * @param corsOrigins List of the CORS Origins..
+     */
+    private static void validateCORSOrigins(List<String> corsOrigins) {
+
+        boolean isValidOrigin = true;
+        if (!CollectionUtils.isEmpty(corsOrigins)) {
+            for (String origin : corsOrigins) {
+                try {
+                    URL url = new URL(origin);
+                    if (StringUtils.isNotEmpty(url.toURI().getPath())) {
+                        isValidOrigin = false;
+                    }
+                } catch (IllegalArgumentException | MalformedURLException | URISyntaxException e) {
+                    isValidOrigin = false;
+                }
+
+                if (!isValidOrigin) {
+                    throw buildBadRequestError("Error creating application. Invalid Allowed Origin found: " +
+                            origin);
+                }
+            }
         }
     }
 }

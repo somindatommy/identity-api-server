@@ -58,6 +58,14 @@ public class Utils {
         }
     }
 
+    public static <T> void setIfNotNull(T value, Consumer<T> consumer) {
+
+        if (value != null) {
+            consumer.accept(value);
+        }
+    }
+
+
     public static <T> Stream<T> arrayToStream(T[] object) {
 
         return object != null ? Stream.of(object) : Stream.empty();
@@ -80,6 +88,15 @@ public class Utils {
             throw buildServerError("Error deep cloning application object.", e);
         }
         return newObject;
+    }
+
+    public static APIError buildBadRequestError(String errorCode, String description) {
+
+        if (errorCode == null) {
+            errorCode = INVALID_REQUEST.getCode();
+        }
+        String errorMessage = "Invalid Request.";
+        return buildClientError(errorCode, errorMessage, description);
     }
 
     public static APIError buildBadRequestError(String description) {
@@ -166,6 +183,18 @@ public class Utils {
                 .build(log, description);
 
         Response.Status status = Response.Status.NOT_FOUND;
+        return new APIError(status, errorResponse);
+    }
+
+    public static APIError buildForbiddenError(String errorCode, String message, String description) {
+
+        ErrorResponse errorResponse = new ErrorResponse.Builder()
+                .withCode(errorCode)
+                .withMessage(message)
+                .withDescription(description)
+                .build(log, description);
+
+        Response.Status status = Response.Status.FORBIDDEN;
         return new APIError(status, errorResponse);
     }
 }
